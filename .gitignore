@@ -1,3 +1,6 @@
+# macOS files
+.DS_Store
+
 # Built application files
 *.apk
 *.ap_
@@ -11,6 +14,8 @@
 # Generated files
 bin/
 gen/
+libs/
+obj/
 out/
 
 # Gradle files
@@ -34,14 +39,25 @@ captures/
 
 # Intellij
 *.iml
-.idea/workspace.xml
-.idea/tasks.xml
-.idea/gradle.xml
-.idea/dictionaries
-.idea/libraries
+.idea
 
 # Keystore files
 *.jks
+
+# Other Android Studio
+/*/local.properties
+/*/out
+/*/*/build
+/*/*/production
+*.iws
+*~
+*.swp
+workspace.xml
+tasks.xml
+.gradle/*
+.idea
+build.properties
+.so
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild
@@ -49,7 +65,3 @@ captures/
 # Google Services (e.g. APIs or Firebase)
 google-services.json
 
-# Freeline
-freeline.py
-freeline/
-freeline_project_description.json
