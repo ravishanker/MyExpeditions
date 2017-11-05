@@ -31,8 +31,10 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     private val pointCloud = PointCloudRenderer()
     private val planeRenderer = PlaneRenderer()
 
-    private val queuedSingleTaps = ArrayBlockingQueue<MotionEvent>(16)// Tap handling and UI.
+    private val queuedSingleTaps = ArrayBlockingQueue<MotionEvent>(16) //Tap handling and UI.
     private val touches = ArrayList<PlaneAttachment>()
+    private val anchorMatrix = FloatArray(16) //Temporary matrix allocated here to reduce number of allocations for each frame.
+
 
     private lateinit var defaultConfig: Config
     private lateinit var session: Session
@@ -114,7 +116,7 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
             // Get projection matrix.
             val projmtx = FloatArray(16)
-            session.getProjectionMatrix(projmtx, 0, 0.1f, 100.0f)
+            session.getProjectionMatrix(projmtx, 0, 0.1f, 100.0f) //10cm to 100m
 
             // Get camera matrix and draw.
             val viewmtx = FloatArray(16)
@@ -137,6 +139,15 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
             // Visualize planes.
             planeRenderer.drawPlanes(session.allPlanes, frame.pose, projmtx)
+
+            // Visualize anchors created by touch.
+            val scaleFactor = 1.0f
+
+            // Get the current combined pose of an Anchor and Plane in world space. The Anchor
+            // and Plane poses are updated during calls to session.update() as ARCore refines
+            // its estimate of the world.
+            touches.filter { it.isTracking }
+                    .forEach { it.pose.toMatrix(anchorMatrix, 0) }
 
         } catch (t: Throwable) {
             // Avoid crashing the application due to unhandled exceptions.
