@@ -6,15 +6,13 @@ import android.os.Bundle
 import android.support.design.widget.Snackbar
 import android.support.v7.app.AppCompatActivity
 import android.util.Log
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import com.google.ar.core.*
-import com.raywenderlich.android.myexpeditions.rendering.BackgroundRenderer
-import com.raywenderlich.android.myexpeditions.rendering.PlaneAttachment
-import com.raywenderlich.android.myexpeditions.rendering.PlaneRenderer
-import com.raywenderlich.android.myexpeditions.rendering.PointCloudRenderer
+import com.raywenderlich.android.myexpeditions.rendering.*
 import kotlinx.android.synthetic.main.activity_main.*
 import java.io.IOException
 import java.util.*
@@ -30,6 +28,8 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     private val backgroundRenderer = BackgroundRenderer()
     private val pointCloud = PointCloudRenderer()
     private val planeRenderer = PlaneRenderer()
+    private val virtualObject = ObjectRenderer()
+    private val virtualObjectShadow = ObjectRenderer()
 
     private val queuedSingleTaps = ArrayBlockingQueue<MotionEvent>(16) //Tap handling and UI.
     private val touches = ArrayList<PlaneAttachment>()
@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
     private lateinit var defaultConfig: Config
     private lateinit var session: Session
+    private lateinit var gestureDetector: GestureDetector
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,6 +46,7 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
         startArcoreSession()
         setupRenderer()
+        setupGestureDetector()
 
     }
 
@@ -122,6 +124,9 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             val viewmtx = FloatArray(16)
             frame.getViewMatrix(viewmtx, 0)
 
+            // Compute lighting from average intensity of the image.
+            val lightIntensity = frame.lightEstimate.pixelIntensity
+
             // Visualize tracked points.
             pointCloud.update(frame.pointCloud)
             pointCloud.draw(frame.pointCloudPose, viewmtx, projmtx)
@@ -147,7 +152,16 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             // and Plane poses are updated during calls to session.update() as ARCore refines
             // its estimate of the world.
             touches.filter { it.isTracking }
-                    .forEach { it.pose.toMatrix(anchorMatrix, 0) }
+                    .forEach {
+                        it.pose.toMatrix(anchorMatrix, 0)
+
+                        // Update and draw the model and its shadow.
+                        virtualObject.updateModelMatrix(anchorMatrix, scaleFactor)
+                        virtualObjectShadow.updateModelMatrix(anchorMatrix, scaleFactor)
+
+                        virtualObject.draw(viewmtx, projmtx, lightIntensity)
+                        virtualObjectShadow.draw(viewmtx, projmtx, lightIntensity)
+                    }
 
         } catch (t: Throwable) {
             // Avoid crashing the application due to unhandled exceptions.
@@ -169,6 +183,20 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         // Create the texture and pass it to ARCore session to be filled during update().
         backgroundRenderer.createOnGlThread(this)
         session.setCameraTextureName(backgroundRenderer.textureId)
+
+        // Prepare the other rendering objects.
+        try {
+            virtualObject.createOnGlThread(/*context=*/this, "andy.obj", "andy.png")
+            virtualObject.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f)
+
+            virtualObjectShadow.createOnGlThread(/*context=*/this,
+                    "andy_shadow.obj", "andy_shadow.png")
+            virtualObjectShadow.setBlendMode(ObjectRenderer.BlendMode.Shadow)
+            virtualObjectShadow.setMaterialProperties(1.0f, 0.0f, 0.0f, 1.0f)
+        } catch (e: IOException) {
+            Log.e(TAG, "Failed to read obj file")
+        }
+
 
         try {
             planeRenderer.createOnGlThread(this, "trigrid.png")
@@ -201,6 +229,27 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         surfaceview.setEGLConfigChooser(8, 8, 8, 8, 16, 0) // Alpha used for plane blending.
         surfaceview.setRenderer(this)
         surfaceview.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+    }
+
+    private fun setupGestureDetector() {
+        // Set up tap listener.
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                onSingleTap(e)
+                return true
+            }
+
+            override fun onDown(e: MotionEvent): Boolean {
+                return true
+            }
+        })
+
+        surfaceview.setOnTouchListener({ _, event -> gestureDetector.onTouchEvent(event) })
+    }
+
+    private fun onSingleTap(e: MotionEvent) {
+        // Queue tap if there is space. Tap is lost if queue is full.
+        queuedSingleTaps.offer(e)
     }
 
     private fun handleTaps(frame: Frame) {
