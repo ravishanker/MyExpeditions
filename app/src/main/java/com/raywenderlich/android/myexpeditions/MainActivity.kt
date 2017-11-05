@@ -84,7 +84,6 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         startArcoreSession()
         setupRenderer()
         setupGestureDetector()
-
     }
 
     override fun onResume() {
