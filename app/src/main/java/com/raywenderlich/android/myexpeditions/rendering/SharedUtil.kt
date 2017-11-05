@@ -68,9 +68,10 @@ object ShaderUtil {
         try {
             val reader = BufferedReader(InputStreamReader(inputStream))
             val sb = StringBuilder()
-            val line = reader.readLine()
-            while (line  != null) {
+            var line: String? = reader.readLine()
+            while (line != null) {
                 sb.append(line).append("\n")
+                line = reader.readLine()
             }
             reader.close()
             return sb.toString()
