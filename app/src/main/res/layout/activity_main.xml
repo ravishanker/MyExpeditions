@@ -6,7 +6,7 @@
     android:layout_height="match_parent"
     tools:context="com.raywenderlich.android.myexpeditions.MainActivity">
 
-    <android.opengl.GLSurfaceView
+    <org.rajawali3d.view.SurfaceView
         android:id="@+id/surfaceview"
         android:layout_width="0dp"
         android:layout_height="0dp"

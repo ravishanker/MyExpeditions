@@ -37,8 +37,8 @@
 
 package com.raywenderlich.android.myexpeditions
 
+import android.content.Context
 import android.opengl.GLES20
-import android.opengl.GLSurfaceView
 import android.os.Bundle
 import android.support.design.widget.Snackbar
 import android.support.v7.app.AppCompatActivity
@@ -51,14 +51,26 @@ import android.widget.Toast
 import com.google.ar.core.*
 import com.raywenderlich.android.myexpeditions.rendering.*
 import kotlinx.android.synthetic.main.activity_main.*
+import org.rajawali3d.loader.LoaderOBJ
+import org.rajawali3d.renderer.Renderer
+import org.rajawali3d.view.ISurface
 import java.io.IOException
 import java.util.*
 import java.util.concurrent.ArrayBlockingQueue
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import org.rajawali3d.lights.DirectionalLight
+import android.view.animation.AccelerateDecelerateInterpolator
+import org.rajawali3d.math.vector.Vector3
+import org.rajawali3d.animation.RotateOnAxisAnimation
+import org.rajawali3d.materials.methods.DiffuseMethod
+import org.rajawali3d.materials.Material
+import org.rajawali3d.primitives.Cube
+import org.rajawali3d.Object3D
+import org.rajawali3d.animation.Animation
 
 
-class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
+class MainActivity : AppCompatActivity() {
     private val TAG = MainActivity::class.java.simpleName
     private var loadingMessageSnackbar: Snackbar? = null
 
@@ -67,15 +79,16 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     private val planeRenderer = PlaneRenderer()
     private val virtualObject = ObjectRenderer()
     private val virtualObjectShadow = ObjectRenderer()
+    private lateinit var modelRenderer: ModelRenderer
 
     private val queuedSingleTaps = ArrayBlockingQueue<MotionEvent>(16) //Tap handling and UI.
     private val touches = ArrayList<PlaneAttachment>()
     private val anchorMatrix = FloatArray(16) //Temporary matrix allocated here to reduce number of allocations for each frame.
 
-
     private lateinit var defaultConfig: Config
     private lateinit var session: Session
     private lateinit var gestureDetector: GestureDetector
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,7 +119,7 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         // Note that the order matters - GLSurfaceView is paused first so that it does not try
         // to query the session. If Session is paused before GLSurfaceView, GLSurfaceView may
         // still call mSession.update() and get a SessionPausedException.
-        surfaceview?.onPause()
+        surfaceview.onPause()
         session.pause()
     }
 
@@ -132,117 +145,6 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         }
     }
 
-    override fun onDrawFrame(gl: GL10?) {
-        // Clear screen to notify driver it should not load any pixels from previous frame.
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-
-        try {
-            // Obtain the current frame from ARSession. When the configuration is set to
-            // UpdateMode.BLOCKING (it is by default), this will throttle the rendering to the
-            // camera framerate.
-            val frame = session.update()
-
-            handleTaps(frame)
-
-            // Draw background.
-            backgroundRenderer.draw(frame)
-
-            // If not tracking, don't draw 3d objects.
-            if (frame.trackingState == Frame.TrackingState.NOT_TRACKING) {
-                return
-            }
-
-            // Get projection matrix.
-            val projmtx = FloatArray(16)
-            session.getProjectionMatrix(projmtx, 0, 0.1f, 100.0f) //10cm to 100m
-
-            // Get camera matrix and draw.
-            val viewmtx = FloatArray(16)
-            frame.getViewMatrix(viewmtx, 0)
-
-            // Compute lighting from average intensity of the image.
-            val lightIntensity = frame.lightEstimate.pixelIntensity
-
-            // Visualize tracked points.
-            pointCloud.update(frame.pointCloud)
-            pointCloud.draw(frame.pointCloudPose, viewmtx, projmtx)
-
-            // Check if we detected at least one plane. If so, hide the loading message.
-            if (loadingMessageSnackbar != null) {
-                for (plane in session.allPlanes) {
-                    if (plane.type == com.google.ar.core.Plane.Type.HORIZONTAL_UPWARD_FACING
-                            && plane.trackingState == Plane.TrackingState.TRACKING) {
-                        hideLoadingMessage()
-                        break
-                    }
-                }
-            }
-
-            // Visualize planes.
-            planeRenderer.drawPlanes(session.allPlanes, frame.pose, projmtx)
-
-            // Visualize anchors created by touch.
-            val scaleFactor = 1.0f
-
-            // Get the current combined pose of an Anchor and Plane in world space. The Anchor
-            // and Plane poses are updated during calls to session.update() as ARCore refines
-            // its estimate of the world.
-            touches.filter { it.isTracking }
-                    .forEach {
-                        it.pose.toMatrix(anchorMatrix, 0)
-
-                        // Update and draw the model and its shadow.
-                        virtualObject.updateModelMatrix(anchorMatrix, scaleFactor)
-                        virtualObjectShadow.updateModelMatrix(anchorMatrix, scaleFactor)
-
-                        virtualObject.draw(viewmtx, projmtx, lightIntensity)
-                        virtualObjectShadow.draw(viewmtx, projmtx, lightIntensity)
-                    }
-
-        } catch (t: Throwable) {
-            // Avoid crashing the application due to unhandled exceptions.
-            Log.e(TAG, "Exception on the OpenGL thread", t)
-        }
-
-    }
-
-    override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-        GLES20.glViewport(0, 0, width, height)
-        // Notify ARCore session that the view size changed so that the perspective matrix and
-        // the video background can be properly adjusted.
-        session.setDisplayGeometry(width.toFloat(), height.toFloat())
-    }
-
-    override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        GLES20.glClearColor(0.1f, 0.1f, 0.1f, 1.0f) //red, green, blue, alpha
-
-        // Create the texture and pass it to ARCore session to be filled during update().
-        backgroundRenderer.createOnGlThread(this)
-        session.setCameraTextureName(backgroundRenderer.textureId)
-
-        // Prepare the other rendering objects.
-        try {
-            virtualObject.createOnGlThread(/*context=*/this, "andy.obj", "andy.png")
-            virtualObject.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f)
-
-            virtualObjectShadow.createOnGlThread(/*context=*/this,
-                    "andy_shadow.obj", "andy_shadow.png")
-            virtualObjectShadow.setBlendMode(ObjectRenderer.BlendMode.Shadow)
-            virtualObjectShadow.setMaterialProperties(1.0f, 0.0f, 0.0f, 1.0f)
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to read obj file")
-        }
-
-
-        try {
-            planeRenderer.createOnGlThread(this, "trigrid.png")
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to read plane texture")
-        }
-
-        pointCloud.createOnGlThread(this)
-    }
-
     private fun startArcoreSession() {
         session = Session(this)
 
@@ -260,18 +162,22 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
     private fun setupRenderer() {
         // Rendering. The Renderers are created here, and initialized when the GL surface is created.
+        modelRenderer = ModelRenderer(this)
+
         surfaceview.preserveEGLContextOnPause = true
+        surfaceview.setTransparent(true)
         surfaceview.setEGLContextClientVersion(2)
         surfaceview.setEGLConfigChooser(8, 8, 8, 8, 16, 0) // Alpha used for plane blending.
-        surfaceview.setRenderer(this)
-        surfaceview.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        surfaceview.setSurfaceRenderer(modelRenderer)
+        surfaceview.renderMode = ISurface.RENDERMODE_CONTINUOUSLY
     }
 
     private fun setupGestureDetector() {
         // Set up tap listener.
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                onSingleTap(e)
+//                onSingleTap(e)
+                modelRenderer.onTouchEvent(e)
                 return true
             }
 
@@ -281,39 +187,6 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         })
 
         surfaceview.setOnTouchListener({ _, event -> gestureDetector.onTouchEvent(event) })
-    }
-
-    private fun onSingleTap(e: MotionEvent) {
-        // Queue tap if there is space. Tap is lost if queue is full.
-        queuedSingleTaps.offer(e)
-    }
-
-    private fun handleTaps(frame: Frame) {
-        // Handle taps. Handling only one tap per frame, as taps are usually low frequency
-        // compared to frame rate.
-        val tap = queuedSingleTaps.poll()
-        if (tap != null && frame.trackingState == Frame.TrackingState.TRACKING) {
-            for (hit in frame.hitTest(tap)) {
-                // Check if any plane was hit, and if it was hit inside the plane polygon.
-                if (hit is PlaneHitResult && hit.isHitInPolygon) {
-                    // Cap the number of objects created. This avoids overloading both the
-                    // rendering system and ARCore.
-                    if (touches.size >= 16) {
-                        session.removeAnchors(Arrays.asList(touches.get(0).anchor))
-                        touches.removeAt(0)
-                    }
-                    // Adding an Anchor tells ARCore that it should track this position in
-                    // space. This anchor will be used in PlaneAttachment to place the 3d model
-                    // in the correct position relative both to the world and to the plane.
-                    touches.add(PlaneAttachment(
-                            hit.plane,
-                            session.addAnchor(hit.getHitPose())))
-
-                    // Hits are sorted by depth. Consider only closest hit on a plane.
-                    break
-                }
-            }
-        }
     }
 
     private fun showLoadingMessage() {
@@ -334,5 +207,235 @@ class MainActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             loadingMessageSnackbar = null
         }
     }
+
+    inner class ModelRenderer(context: Context) : Renderer(context) {
+        val light = DirectionalLight(0.0, 0.0, -1.0)
+        val monkey = Cube(2.0f)
+        val anim = RotateOnAxisAnimation(Vector3.Axis.Y, 360.0)
+
+        override fun onRenderSurfaceCreated(config: EGLConfig?, gl: GL10?, width: Int, height: Int) {
+//            super.onRenderSurfaceCreated(config, gl, width, height)
+
+            GLES20.glClearColor(0.1f, 0.1f, 0.1f, 1.0f) //red, green, blue, alpha
+
+            // Create the texture and pass it to ARCore session to be filled during update().
+            backgroundRenderer.createOnGlThread(context)
+            session.setCameraTextureName(backgroundRenderer.textureId)
+
+            // Prepare the other rendering objects.
+//            prepareDroidModel()
+
+            preparePyramidModel()
+
+            try {
+                planeRenderer.createOnGlThread(context, "trigrid.png")
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to read plane texture")
+            }
+
+            pointCloud.createOnGlThread(context)
+        }
+
+        override fun onRenderSurfaceSizeChanged(gl: GL10?, width: Int, height: Int) {
+//            super.onRenderSurfaceSizeChanged(gl, width, height)
+
+            GLES20.glViewport(0, 0, width, height)
+            // Notify ARCore session that the view size changed so that the perspective matrix and
+            // the video background can be properly adjusted.
+            session.setDisplayGeometry(width.toFloat(), height.toFloat())
+        }
+
+        override fun onRenderFrame(gl: GL10?) {
+//            super.onRenderFrame(gl)
+
+            // Clear screen to notify driver it should not load any pixels from previous frame.
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+
+            try {
+                // Obtain the current frame from ARSession. When the configuration is set to
+                // UpdateMode.BLOCKING (it is by default), this will throttle the rendering to the
+                // camera framerate.
+                val frame = session.update()
+
+                handleTaps(frame)
+
+                // Draw background.
+                backgroundRenderer.draw(frame)
+
+                // If not tracking, don't draw 3d objects.
+                if (frame.trackingState == Frame.TrackingState.NOT_TRACKING) {
+                    return
+                }
+
+                // Get projection matrix.
+                val projmtx = FloatArray(16)
+                session.getProjectionMatrix(projmtx, 0, 0.1f, 100.0f) //10cm to 100m
+
+                // Get camera matrix and draw.
+                val viewmtx = FloatArray(16)
+                frame.getViewMatrix(viewmtx, 0)
+
+                // Compute lighting from average intensity of the image.
+                val lightIntensity = frame.lightEstimate.pixelIntensity
+
+                // Visualize tracked points.
+                pointCloud.update(frame.pointCloud)
+                pointCloud.draw(frame.pointCloudPose, viewmtx, projmtx)
+
+                // Check if we detected at least one plane. If so, hide the loading message.
+                if (loadingMessageSnackbar != null) {
+                    for (plane in session.allPlanes) {
+                        if (plane.type == com.google.ar.core.Plane.Type.HORIZONTAL_UPWARD_FACING
+                                && plane.trackingState == Plane.TrackingState.TRACKING) {
+                            hideLoadingMessage()
+                            break
+                        }
+                    }
+                }
+
+                // Visualize planes.
+                planeRenderer.drawPlanes(session.allPlanes, frame.pose, projmtx)
+
+                // Visualize anchors created by touch.
+                val scaleFactor = 1.0f
+
+                // Get the current combined pose of an Anchor and Plane in world space. The Anchor
+                // and Plane poses are updated during calls to session.update() as ARCore refines
+                // its estimate of the world.
+                touches.filter { it.isTracking }
+                        .forEach {
+                            it.pose.toMatrix(anchorMatrix, 0)
+
+                            // Update and draw the model and its shadow.
+//                            renderDroidModel(scaleFactor, viewmtx, projmtx, lightIntensity)
+
+                            renderPyramidModel()
+
+
+                        }
+
+            } catch (t: Throwable) {
+                // Avoid crashing the application due to unhandled exceptions.
+                Log.e(TAG, "Exception on the OpenGL thread", t)
+            }
+        }
+
+        override fun initScene() {
+            //To change body of created functions use File | Settings | File Templates.
+        }
+
+        override fun onTouchEvent(event: MotionEvent?) {
+            // Queue tap if there is space. Tap is lost if queue is full.
+            queuedSingleTaps.offer(event)
+        }
+
+        override fun onOffsetsChanged(xOffset: Float, yOffset: Float, xOffsetStep: Float, yOffsetStep: Float, xPixelOffset: Int, yPixelOffset: Int) {
+            //To change body of created functions use File | Settings | File Templates.
+        }
+
+        private fun handleTaps(frame: Frame) {
+            // Handle taps. Handling only one tap per frame, as taps are usually low frequency
+            // compared to frame rate.
+            val tap = queuedSingleTaps.poll()
+            if (tap != null && frame.trackingState == Frame.TrackingState.TRACKING) {
+                for (hit in frame.hitTest(tap)) {
+                    // Check if any plane was hit, and if it was hit inside the plane polygon.
+                    if (hit is PlaneHitResult && hit.isHitInPolygon) {
+                        // Cap the number of objects created. This avoids overloading both the
+                        // rendering system and ARCore.
+                        if (touches.size >= 16) {
+                            session.removeAnchors(Arrays.asList(touches.get(0).anchor))
+                            touches.removeAt(0)
+                        }
+                        // Adding an Anchor tells ARCore that it should track this position in
+                        // space. This anchor will be used in PlaneAttachment to place the 3d model
+                        // in the correct position relative both to the world and to the plane.
+                        touches.add(PlaneAttachment(
+                                hit.plane,
+                                session.addAnchor(hit.getHitPose())))
+
+                        // Hits are sorted by depth. Consider only closest hit on a plane.
+                        break
+                    }
+                }
+            }
+        }
+
+        private fun prepareDroidModel() {
+            try {
+                virtualObject.createOnGlThread(/*context=*/context, "andy.obj", "andy.png")
+                virtualObject.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f)
+
+                virtualObjectShadow.createOnGlThread(/*context=*/context,
+                        "andy_shadow.obj", "andy_shadow.png")
+                virtualObjectShadow.setBlendMode(ObjectRenderer.BlendMode.Shadow)
+                virtualObjectShadow.setMaterialProperties(1.0f, 0.0f, 0.0f, 1.0f)
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to read obj file")
+            }
+        }
+
+        private fun renderDroidModel(scaleFactor: Float, viewmtx: FloatArray, projmtx: FloatArray, lightIntensity: Float) {
+            virtualObject.updateModelMatrix(anchorMatrix, scaleFactor)
+            virtualObjectShadow.updateModelMatrix(anchorMatrix, scaleFactor)
+
+            virtualObject.draw(viewmtx, projmtx, lightIntensity)
+            virtualObjectShadow.draw(viewmtx, projmtx, lightIntensity)
+        }
+
+        private fun preparePyramidModel() {
+//            val loaderOBJ = LoaderOBJ(context.getResources(), mTextureManager, R.raw.sm_pyramid_obj)
+            addLight()
+            addMaterial(monkey)
+            addAnimation(monkey)
+        }
+
+        private fun renderPyramidModel() {
+
+            // -- set the background color to be transparent
+            // you need to have called setGLBackgroundTransparent(true); in the activity
+            // for this to work.
+            currentScene.backgroundColor = 0
+            currentScene.addLight(light)
+            currentCamera.setPosition(0.0, 0.0, 16.0)
+            currentScene.addChild(monkey)
+            currentScene.registerAnimation(anim)
+            anim.transformable3D = monkey
+            anim.play()
+
+        }
+
+        private fun addLight() {
+            light.power = 1f
+        }
+
+        private fun addMaterial(monkey: Cube) {
+            try {
+                val material = Material()
+                material.enableLighting(true)
+                material.diffuseMethod = DiffuseMethod.Lambert()
+                monkey.material = material
+                monkey.setColor(-0x7400)
+                monkey.setScale(2.0)
+//                currentScene.addChild(monkey)
+
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+        }
+
+        private fun addAnimation(monkey: Cube) {
+            //val anim = RotateOnAxisAnimation(Vector3.Axis.Y, 360.0)
+            anim.durationMilliseconds = 6000
+            anim.repeatMode = Animation.RepeatMode.INFINITE
+            anim.interpolator = AccelerateDecelerateInterpolator()
+//            currentScene.registerAnimation(anim)
+//            anim.play()
+        }
+
+    }
+
 
 }
