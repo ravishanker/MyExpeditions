@@ -139,7 +139,7 @@ class BackgroundRenderer {
         // If display rotation changed (also includes view size change), we need to re-query the uv
         // coordinates for the screen rect, as they may have changed as well.
         if (frame.isDisplayRotationChanged) {
-            frame.transformDisplayUvCoords(mQuadTexCoord!!, mQuadTexCoordTransformed!!)
+            frame.transformDisplayUvCoords(mQuadTexCoord, mQuadTexCoordTransformed)
         }
 
         // No need to test or write depth, the screen quad has arbitrary depth, and is expected
